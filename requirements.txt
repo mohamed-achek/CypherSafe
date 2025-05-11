@@ -1,4 +1,6 @@
 cryptography
 pycryptodome
-tk
 streamlit
+opencv-python-headless  
+numpy  
+pillow

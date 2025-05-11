@@ -4,3 +4,4 @@ venv/
 cyph/
 __pycache__
 .streamlit
+cyphersafe.db

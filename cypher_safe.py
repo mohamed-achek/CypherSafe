@@ -7,20 +7,101 @@ from algorithms import (
     sha256_hash, sha512_hash, md5_hash,
     rsa_sign, ecc_sign, verify_signature
 )
-from base64 import b64encode
+from base64 import b64encode, b64decode
 import os
 from io import BytesIO
+from PIL import Image  # Import for image processing
+from password_system import main as password_system_main  # Import the password system
+import sqlite3
+import secrets
+from datetime import datetime
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+from cryptography.fernet import Fernet  # Import Fernet for symmetric encryption
 
 # Set the page configuration with a custom icon
 st.set_page_config(page_title="CypherSafe", page_icon="Assets/white_on_trans.png")
 
+def pixelate_image(image_data):
+    """Apply pixelation effect to an image."""
+    image = Image.open(BytesIO(image_data))
+    small = image.resize((image.width // 10, image.height // 10), resample=Image.BILINEAR)
+    pixelated = small.resize(image.size, Image.NEAREST)
+    output = BytesIO()
+    pixelated.save(output, format=image.format)
+    return output.getvalue()
+
+def get_key_from_password(password: str, truncate_to: int = 32) -> bytes:
+    """Retrieve or generate a key for the given password, truncated to the required length."""
+    conn = sqlite3.connect("cyphersafe.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT salt FROM encrypted_keys WHERE password = ?", (password,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        salt = row[0]
+        full_key = derive_key(password, salt)  # Derive the full 32-byte key
+        st.info("Using existing key associated with this password.")
+    else:
+        salt = secrets.token_bytes(16)
+        full_key = derive_key(password, salt)  # Generate a new full 32-byte key
+        st.success("New key generated for this password.")
+        # Insert the new key into the database
+        conn = sqlite3.connect("cyphersafe.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO encrypted_keys (password, salt, timestamp)
+            VALUES (?, ?, ?)
+        """, (password, salt, datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+
+    return full_key[:truncate_to]  # Truncate the key to the required length
+
+def derive_key(password: str, salt: bytes) -> bytes:
+    """Derive a cryptographic key from a password using PBKDF2."""
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,  # Derive a 32-byte key
+        salt=salt,
+        iterations=100000,
+        backend=default_backend()
+    )
+    return kdf.derive(password.encode())
+
+def init_db():
+    """Initialize the SQLite database and create the encrypted_keys table if it doesn't exist."""
+    conn = sqlite3.connect("cyphersafe.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS encrypted_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            password TEXT UNIQUE,
+            salt BLOB,
+            timestamp TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
 def main():
+    # Initialize the database
+    init_db()
+
     # Display the logo at the top of the app
-    st.image("Assets/original.png", width=200)  # Adjust the width as needed
+    try:
+        st.image("Assets/original.png", width=200)  # Adjust the width as needed
+    except FileNotFoundError:
+        st.warning("Logo not found. Ensure 'Assets/original.png' exists.")
     st.title("CypherSafe")
 
     st.sidebar.title("Algorithms")
-    st.sidebar.image("Assets/algo.png", width=200)  # Adjust the width as needed
+    try:
+        st.sidebar.image("Assets/algo.png", width=200)  # Adjust the width as needed
+    except FileNotFoundError:
+        st.warning("Sidebar image not found. Ensure 'Assets/algo.png' exists.")
     mode = st.sidebar.selectbox("Select Mode", ["Symmetric", "Asymmetric", "Hashing", "Digital Signature"])
 
     if mode == "Symmetric":
@@ -31,14 +112,23 @@ def main():
         with tab_aes:
             st.subheader("AES (Advanced Encryption Standard)")
             uploaded_file = st.file_uploader("Upload a File (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"])
-            key = st.text_input("Key (16 bytes)", type="password")
+            
+            # Use a temporary variable to handle the key
+            if "aes_key_temp" not in st.session_state:
+                st.session_state["aes_key_temp"] = ""
+
+            key = st.text_input("Key (16 bytes)", value=st.session_state["aes_key_temp"], type="password", key="aes_key")
             
             if st.button("Generate AES Key"):
-                try:
-                    generated_key = generate_aes_key(16)  # Ensure the generated key is exactly 16 bytes
-                    st.text_area("Generated Key (16 bytes)", b64encode(generated_key).decode(), height=68)
-                except ValueError as e:
-                    st.error(f"Error: {e}")
+                password = st.text_input("Enter Password for Key Generation", type="password", key="aes_password")
+                if password:
+                    try:
+                        generated_key = get_key_from_password(password, truncate_to=16)  # Truncate to 16 bytes for AES
+                        st.session_state["aes_key_temp"] = b64encode(generated_key).decode()  # Update the temporary variable
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+                else:
+                    st.error("Please enter a password to generate a key.")
 
             operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="aes_operation")
 
@@ -46,26 +136,31 @@ def main():
                 try:
                     if uploaded_file is None:
                         st.error("Please upload a file.")
-                    elif len(key.encode()) != 16:
-                        st.error(f"Invalid Key Length: Key must be exactly 16 bytes. Current length is {len(key.encode())} bytes.")
                     else:
-                        file_content = uploaded_file.read()
-                        if operation == "Encrypt":
-                            result = aes_encrypt(file_content, key.encode())
-                            file_name = f"encrypted_{uploaded_file.name}"
+                        # Decode the Base64 key and validate its length
+                        decoded_key = b64decode(key.encode())
+                        if len(decoded_key) != 16:
+                            st.error(f"Invalid Key Length: Key must be exactly 16 bytes. Current length is {len(decoded_key)} bytes.")
                         else:
-                            result = aes_decrypt(file_content, key.encode())
-                            file_name = f"decrypted_{uploaded_file.name}"
-                        
-                        st.text_area("Result", result, height=150)  # Adjusted height for better display
-                        
-                        # Provide download link for the result
-                        st.download_button(
-                            label="Download Result",
-                            data=BytesIO(result.encode() if isinstance(result, str) else result),
-                            file_name=file_name,
-                            mime="application/octet-stream"
-                        )
+                            file_content = uploaded_file.read()
+                            if operation == "Encrypt":
+                                result = aes_encrypt(file_content, decoded_key)
+                                file_name = f"encrypted_{uploaded_file.name}"
+                                
+                                # Apply pixelation if the file is an image
+                                if uploaded_file.type.startswith("image/"):
+                                    result = pixelate_image(file_content)
+                            else:
+                                result = aes_decrypt(file_content, decoded_key)
+                                file_name = f"decrypted_{uploaded_file.name}"
+                            
+                            # Save the result as a downloadable file
+                            st.download_button(
+                                label="Download Result",
+                                data=BytesIO(result if isinstance(result, bytes) else result.encode()),
+                                file_name=file_name,
+                                mime="application/octet-stream"
+                            )
                 except Exception as e:
                     st.error(f"Error: {e}")
 
@@ -73,11 +168,23 @@ def main():
         with tab_fernet:
             st.subheader("Fernet (Symmetric Encryption Using AES)")
             uploaded_file = st.file_uploader("Upload a File (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="fernet_file")
-            key = st.text_input("Key", type="password", key="fernet_key")
+            
+            # Use a temporary variable to handle the key
+            if "fernet_key_temp" not in st.session_state:
+                st.session_state["fernet_key_temp"] = ""
+
+            key = st.text_input("Key", value=st.session_state["fernet_key_temp"], type="password", key="fernet_key")
             
             if st.button("Generate Fernet Key"):
-                fernet_key = Fernet.generate_key()
-                st.text_area("Generated Key", fernet_key.decode(), height=68)  # Adjusted height
+                password = st.text_input("Enter Password for Key Generation", type="password", key="fernet_password")
+                if password:
+                    try:
+                        fernet_key = get_key_from_password(password)  # Use the full 32-byte key for Fernet
+                        st.session_state["fernet_key_temp"] = b64encode(fernet_key).decode()  # Update the temporary variable
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+                else:
+                    st.error("Please enter a password to generate a key.")
 
             operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="fernet_operation")
 
@@ -89,18 +196,16 @@ def main():
                         file_content = uploaded_file.read()
                         fernet = Fernet(key.encode())
                         if operation == "Encrypt":
-                            result = fernet.encrypt(file_content).decode()
+                            result = fernet.encrypt(file_content)
                             file_name = f"encrypted_{uploaded_file.name}"
                         else:
-                            result = fernet.decrypt(file_content).decode()
+                            result = fernet.decrypt(file_content)
                             file_name = f"decrypted_{uploaded_file.name}"
                         
-                        st.text_area("Result", result, height=150)  # Adjusted height
-                        
-                        # Provide download link for the result
+                        # Save the result as a downloadable file
                         st.download_button(
                             label="Download Result",
-                            data=BytesIO(result.encode() if isinstance(result, str) else result),
+                            data=BytesIO(result),
                             file_name=file_name,
                             mime="application/octet-stream"
                         )
@@ -111,11 +216,26 @@ def main():
         with tab_des:
             st.subheader("DES (Data Encryption Standard)")
             uploaded_file = st.file_uploader("Upload a File (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="des_file")
-            key = st.text_input("Key (8 bytes)", type="password", key="des_key")
+            
+            # Use a temporary variable to handle the key
+            if "des_key_temp" not in st.session_state:
+                st.session_state["des_key_temp"] = ""
+
+            key = st.text_input("Key (8 bytes)", value=st.session_state["des_key_temp"], type="password", key="des_key_input")
             
             if st.button("Generate DES Key"):
-                generated_key = generate_des_key()
-                st.text_area("Generated Key", b64encode(generated_key).decode(), height=68)  # Adjusted height
+                password = st.text_input("Enter Password for Key Generation", type="password", key="des_password")
+                if password:
+                    try:
+                        des_key = get_key_from_password(password, truncate_to=8)  # Truncate to 8 bytes for DES
+                        if len(des_key) != 8:
+                            st.error("Generated key is not 8 bytes. Please try again.")
+                        else:
+                            st.session_state["des_key_temp"] = b64encode(des_key).decode()  # Update the temporary variable
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+                else:
+                    st.error("Please enter a password to generate a key.")
 
             operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="des_operation")
 
@@ -123,26 +243,26 @@ def main():
                 try:
                     if uploaded_file is None:
                         st.error("Please upload a file.")
-                    elif len(key.encode()) != 8:
-                        st.error("Key must be 8 bytes for DES.")
                     else:
-                        file_content = uploaded_file.read()
-                        if operation == "Encrypt":
-                            result = des_encrypt(file_content, key.encode())
-                            file_name = f"encrypted_{uploaded_file.name}"
+                        decoded_key = b64decode(key.encode())
+                        if len(decoded_key) != 8:
+                            st.error(f"Invalid Key Length: Key must be exactly 8 bytes. Current length is {len(decoded_key)} bytes.")
                         else:
-                            result = des_decrypt(file_content, key.encode())
-                            file_name = f"decrypted_{uploaded_file.name}"
-                        
-                        st.text_area("Result", result, height=150)  # Adjusted height
-                        
-                        # Provide download link for the result
-                        st.download_button(
-                            label="Download Result",
-                            data=BytesIO(result.encode() if isinstance(result, str) else result),
-                            file_name=file_name,
-                            mime="application/octet-stream"
-                        )
+                            file_content = uploaded_file.read()
+                            if operation == "Encrypt":
+                                result = des_encrypt(file_content, decoded_key)
+                                file_name = f"encrypted_{uploaded_file.name}"
+                            else:
+                                result = des_decrypt(file_content, decoded_key)
+                                file_name = f"decrypted_{uploaded_file.name}"
+                            
+                            # Save the result as a downloadable file
+                            st.download_button(
+                                label="Download Result",
+                                data=BytesIO(result if isinstance(result, bytes) else result.encode()),
+                                file_name=file_name,
+                                mime="application/octet-stream"
+                            )
                 except Exception as e:
                     st.error(f"Error: {e}")
 
@@ -406,4 +526,7 @@ def main():
                     st.error(f"Error: {e}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
