@@ -2,3 +2,5 @@
 .venv/
 venv/
 cyph/
+__pycache__
+.streamlit
