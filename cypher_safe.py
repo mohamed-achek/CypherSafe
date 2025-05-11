@@ -1,12 +1,5 @@
 import streamlit as st
-from algorithms import (
-    aes_encrypt, aes_decrypt, generate_aes_key,
-    des_encrypt, des_decrypt, generate_des_key,
-    rsa_encrypt, rsa_decrypt, generate_rsa_keys,
-    ecc_encrypt, ecc_decrypt, generate_ecc_keys,
-    sha256_hash, sha512_hash, md5_hash,
-    rsa_sign, ecc_sign, verify_signature
-)
+from algorithms import *
 from base64 import b64encode, b64decode
 import os
 from io import BytesIO
@@ -92,7 +85,7 @@ def main():
 
     # Display the logo at the top of the app
     try:
-        st.image("Assets/original.png", width=200)  # Adjust the width as needed
+        st.image("Assets/white_on_trans.png", width=200)  # Adjust the width as needed
     except FileNotFoundError:
         st.warning("Logo not found. Ensure 'Assets/original.png' exists.")
     st.title("CypherSafe")
@@ -125,6 +118,7 @@ def main():
                     try:
                         generated_key = get_key_from_password(password, truncate_to=16)  # Truncate to 16 bytes for AES
                         st.session_state["aes_key_temp"] = b64encode(generated_key).decode()  # Update the temporary variable
+                        st.success("AES Key generated successfully.")
                     except Exception as e:
                         st.error(f"Error: {e}")
                 else:
@@ -181,6 +175,7 @@ def main():
                     try:
                         fernet_key = get_key_from_password(password)  # Use the full 32-byte key for Fernet
                         st.session_state["fernet_key_temp"] = b64encode(fernet_key).decode()  # Update the temporary variable
+                        st.success("Fernet Key generated successfully.")
                     except Exception as e:
                         st.error(f"Error: {e}")
                 else:
@@ -232,6 +227,7 @@ def main():
                             st.error("Generated key is not 8 bytes. Please try again.")
                         else:
                             st.session_state["des_key_temp"] = b64encode(des_key).decode()  # Update the temporary variable
+                            st.success("DES Key generated successfully.")
                     except Exception as e:
                         st.error(f"Error: {e}")
                 else:
@@ -276,55 +272,95 @@ def main():
             operation = st.selectbox("Operation", ["Generate Keys", "Encrypt", "Decrypt"], key="rsa_operation")
 
             if operation == "Generate Keys":
+                if "rsa_private_key" not in st.session_state:
+                    st.session_state["rsa_private_key"] = ""
+                if "rsa_public_key" not in st.session_state:
+                    st.session_state["rsa_public_key"] = ""
+
                 if st.button("Generate RSA Keys"):
-                    private_key, public_key = generate_rsa_keys()
-                    st.text_area("Private Key", private_key.private_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PrivateFormat.PKCS8,
-                        encryption_algorithm=serialization.NoEncryption()
-                    ).decode(), height=150)
-                    st.text_area("Public Key", public_key.public_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PublicFormat.SubjectPublicKeyInfo
-                    ).decode(), height=150)
+                    try:
+                        private_key_pem, public_key_pem = generate_rsa_keys()
+                        st.session_state["rsa_private_key"] = private_key_pem
+                        st.session_state["rsa_public_key"] = public_key_pem
+                        st.success("RSA keys generated successfully.")
+                    except Exception as e:
+                        st.error(f"Error generating RSA keys: {e}")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.text_area("Private Key", st.session_state["rsa_private_key"], height=150, key="rsa_private_key_area")
+                    st.download_button(
+                        label="Download Private Key",
+                        data=st.session_state["rsa_private_key"],
+                        file_name="rsa_private_key.pem",
+                        mime="application/x-pem-file"
+                    )
+
+                with col2:
+                    st.text_area("Public Key", st.session_state["rsa_public_key"], height=150, key="rsa_public_key_area")
+                    st.download_button(
+                        label="Download Public Key",
+                        data=st.session_state["rsa_public_key"],
+                        file_name="rsa_public_key.pem",
+                        mime="application/x-pem-file"
+                    )
 
             elif operation == "Encrypt":
-                plaintext = st.text_area("Input Text", key="rsa_plaintext")
-                public_key_pem = st.text_area("Public Key", key="rsa_public_key")
+                uploaded_file = st.file_uploader("Upload File to Encrypt (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="rsa_encrypt_file")
+                uploaded_public_key = st.file_uploader("Upload Public Key", type=["pem"], key="rsa_upload_public_key")
+                public_key_pem = None
+                if uploaded_public_key:
+                    public_key_pem = uploaded_public_key.read().decode()
+                else:
+                    public_key_pem = st.text_area("Public Key", key="rsa_public_key")
+
                 if st.button("Encrypt RSA"):
                     try:
-                        public_key = serialization.load_pem_public_key(public_key_pem.encode(), backend=default_backend())
-                        result = rsa_encrypt(plaintext, public_key)
-                        st.text_area("Result", result, height=100)
-                        
-                        # Provide download link for the result
-                        st.download_button(
-                            label="Download Result",
-                            data=BytesIO(result.encode() if isinstance(result, str) else result),
-                            file_name="encrypted_rsa.txt",
-                            mime="application/octet-stream"
-                        )
+                        if not uploaded_file:
+                            st.error("Please upload a file to encrypt.")
+                        elif not public_key_pem:
+                            st.error("Please provide or upload a public key.")
+                        else:
+                            file_content = uploaded_file.read()
+                            result = rsa_encrypt(file_content.decode(), public_key_pem)
+                            st.text_area("Result", result, height=100)
+                            st.download_button(
+                                label="Download Encrypted File",
+                                data=result.encode(),
+                                file_name=f"encrypted_{uploaded_file.name}",
+                                mime="application/octet-stream"
+                            )
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error encrypting with RSA: {e}")
 
             elif operation == "Decrypt":
-                ciphertext = st.text_area("Ciphertext", key="rsa_ciphertext")
-                private_key_pem = st.text_area("Private Key", key="rsa_private_key")
+                uploaded_file = st.file_uploader("Upload File to Decrypt (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="rsa_decrypt_file")
+                uploaded_private_key = st.file_uploader("Upload Private Key", type=["pem"], key="rsa_upload_private_key")
+                private_key_pem = None
+                if uploaded_private_key:
+                    private_key_pem = uploaded_private_key.read().decode()
+                else:
+                    private_key_pem = st.text_area("Private Key", key="rsa_private_key")
+
                 if st.button("Decrypt RSA"):
                     try:
-                        private_key = serialization.load_pem_private_key(private_key_pem.encode(), password=None, backend=default_backend())
-                        result = rsa_decrypt(ciphertext, private_key)
-                        st.text_area("Result", result, height=100)
-                        
-                        # Provide download link for the result
-                        st.download_button(
-                            label="Download Result",
-                            data=BytesIO(result.encode() if isinstance(result, str) else result),
-                            file_name="decrypted_rsa.txt",
-                            mime="application/octet-stream"
-                        )
+                        if not uploaded_file:
+                            st.error("Please upload a file to decrypt.")
+                        elif not private_key_pem:
+                            st.error("Please provide or upload a private key.")
+                        else:
+                            file_content = uploaded_file.read()
+                            result = rsa_decrypt(file_content.decode(), private_key_pem)
+                            st.text_area("Result", result, height=100)
+                            st.download_button(
+                                label="Download Decrypted File",
+                                data=result.encode(),
+                                file_name=f"decrypted_{uploaded_file.name}",
+                                mime="application/octet-stream"
+                            )
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error decrypting with RSA: {e}")
 
         # ECC Tab
         with tab_ecc:
@@ -332,55 +368,95 @@ def main():
             operation = st.selectbox("Operation", ["Generate Keys", "Encrypt", "Decrypt"], key="ecc_operation")
 
             if operation == "Generate Keys":
+                if "ecc_private_key" not in st.session_state:
+                    st.session_state["ecc_private_key"] = ""
+                if "ecc_public_key" not in st.session_state:
+                    st.session_state["ecc_public_key"] = ""
+
                 if st.button("Generate ECC Keys"):
-                    private_key, public_key = generate_ecc_keys()
-                    st.text_area("Private Key", private_key.private_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PrivateFormat.PKCS8,
-                        encryption_algorithm=serialization.NoEncryption()
-                    ).decode(), height=150)
-                    st.text_area("Public Key", public_key.public_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PublicFormat.SubjectPublicKeyInfo
-                    ).decode(), height=150)
+                    try:
+                        private_key_pem, public_key_pem = generate_ecc_keys()
+                        st.session_state["ecc_private_key"] = private_key_pem
+                        st.session_state["ecc_public_key"] = public_key_pem
+                        st.success("ECC keys generated successfully.")
+                    except Exception as e:
+                        st.error(f"Error generating ECC keys: {e}")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.text_area("Private Key", st.session_state["ecc_private_key"], height=150, key="ecc_private_key_area")
+                    st.download_button(
+                        label="Download Private Key",
+                        data=st.session_state["ecc_private_key"],
+                        file_name="ecc_private_key.pem",
+                        mime="application/x-pem-file"
+                    )
+
+                with col2:
+                    st.text_area("Public Key", st.session_state["ecc_public_key"], height=150, key="ecc_public_key_area")
+                    st.download_button(
+                        label="Download Public Key",
+                        data=st.session_state["ecc_public_key"],
+                        file_name="ecc_public_key.pem",
+                        mime="application/x-pem-file"
+                    )
 
             elif operation == "Encrypt":
-                plaintext = st.text_area("Input Text", key="ecc_plaintext")
-                public_key_pem = st.text_area("Public Key", key="ecc_public_key")
+                uploaded_file = st.file_uploader("Upload File to Encrypt (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="ecc_encrypt_file")
+                uploaded_public_key = st.file_uploader("Upload Public Key", type=["pem"], key="ecc_upload_public_key")
+                public_key_pem = None
+                if uploaded_public_key:
+                    public_key_pem = uploaded_public_key.read().decode()
+                else:
+                    public_key_pem = st.text_area("Public Key", key="ecc_public_key")
+
                 if st.button("Encrypt ECC"):
                     try:
-                        # Placeholder for ECC encryption
-                        result = ecc_encrypt(plaintext, public_key_pem)
-                        st.text_area("Result", result, height=100)
-                        
-                        # Provide download link for the result
-                        st.download_button(
-                            label="Download Result",
-                            data=BytesIO(result.encode() if isinstance(result, str) else result),
-                            file_name="encrypted_ecc.txt",
-                            mime="application/octet-stream"
-                        )
+                        if not uploaded_file:
+                            st.error("Please upload a file to encrypt.")
+                        elif not public_key_pem:
+                            st.error("Please provide or upload a public key.")
+                        else:
+                            file_content = uploaded_file.read()
+                            result = ecc_encrypt(file_content.decode(), public_key_pem)
+                            st.text_area("Result", result, height=100)
+                            st.download_button(
+                                label="Download Encrypted File",
+                                data=result.encode(),
+                                file_name=f"encrypted_{uploaded_file.name}",
+                                mime="application/octet-stream"
+                            )
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error encrypting with ECC: {e}")
 
             elif operation == "Decrypt":
-                ciphertext = st.text_area("Ciphertext", key="ecc_ciphertext")
-                private_key_pem = st.text_area("Private Key", key="ecc_private_key")
+                uploaded_file = st.file_uploader("Upload File to Decrypt (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="ecc_decrypt_file")
+                uploaded_private_key = st.file_uploader("Upload Private Key", type=["pem"], key="ecc_upload_private_key")
+                private_key_pem = None
+                if uploaded_private_key:
+                    private_key_pem = uploaded_private_key.read().decode()
+                else:
+                    private_key_pem = st.text_area("Private Key", key="ecc_private_key")
+
                 if st.button("Decrypt ECC"):
                     try:
-                        # Placeholder for ECC decryption
-                        result = ecc_decrypt(ciphertext, private_key_pem)
-                        st.text_area("Result", result, height=100)
-                        
-                        # Provide download link for the result
-                        st.download_button(
-                            label="Download Result",
-                            data=BytesIO(result.encode() if isinstance(result, str) else result),
-                            file_name="decrypted_ecc.txt",
-                            mime="application/octet-stream"
-                        )
+                        if not uploaded_file:
+                            st.error("Please upload a file to decrypt.")
+                        elif not private_key_pem:
+                            st.error("Please provide or upload a private key.")
+                        else:
+                            file_content = uploaded_file.read()
+                            result = ecc_decrypt(file_content.decode(), private_key_pem)
+                            st.text_area("Result", result, height=100)
+                            st.download_button(
+                                label="Download Decrypted File",
+                                data=result.encode(),
+                                file_name=f"decrypted_{uploaded_file.name}",
+                                mime="application/octet-stream"
+                            )
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error decrypting with ECC: {e}")
 
     elif mode == "Hashing":
         st.header("Hashing")
@@ -462,68 +538,108 @@ def main():
         # RSA Digital Signature Tab
         with tab_rsa_sign:
             st.subheader("RSA Digital Signature")
-            private_key_pem = st.text_area("Private Key (PEM Format)", key="rsa_sign_private_key")
-            message = st.text_area("Message to Sign", key="rsa_sign_message")
+            if "rsa_sign_private_key" not in st.session_state:
+                st.session_state["rsa_sign_private_key"] = ""
+
+            if st.button("Generate RSA Private Key for Signing"):
+                try:
+                    private_key_pem, _ = generate_rsa_keys()
+                    st.session_state["rsa_sign_private_key"] = private_key_pem
+                    st.success("RSA private key for signing generated successfully.")
+                except Exception as e:
+                    st.error(f"Error generating RSA private key: {e}")
+
+            st.text_area("Private Key (PEM Format)", st.session_state["rsa_sign_private_key"], height=150, key="rsa_sign_private_key_area")
+            st.download_button(
+                label="Download Private Key",
+                data=st.session_state["rsa_sign_private_key"],
+                file_name="rsa_sign_private_key.pem",
+                mime="application/x-pem-file"
+            )
+            uploaded_file = st.file_uploader("Upload File to Sign (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="rsa_sign_file")
+
             if st.button("Sign with RSA"):
                 try:
-                    if not private_key_pem or not message:
-                        st.error("Please provide both the private key and the message.")
+                    if not st.session_state["rsa_sign_private_key"]:
+                        st.error("Please generate or provide a private key.")
+                    elif not uploaded_file:
+                        st.error("Please upload a file to sign.")
                     else:
-                        signature = rsa_sign(message, private_key_pem)
+                        file_content = uploaded_file.read()
+                        signature = rsa_sign(file_content, st.session_state["rsa_sign_private_key"])
                         st.text_area("Digital Signature (RSA)", signature, height=100)
-                        
-                        # Provide download link for the result
                         st.download_button(
-                            label="Download Result",
-                            data=BytesIO(signature.encode() if isinstance(signature, str) else signature),
+                            label="Download Signature",
+                            data=BytesIO(signature.encode()),
                             file_name="rsa_signature.txt",
                             mime="application/octet-stream"
                         )
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Error signing with RSA: {e}")
 
         # ECC Digital Signature Tab
         with tab_ecc_sign:
             st.subheader("ECC Digital Signature")
-            private_key_pem = st.text_area("Private Key (PEM Format)", key="ecc_sign_private_key")
-            message = st.text_area("Message to Sign", key="ecc_sign_message")
+            if "ecc_sign_private_key" not in st.session_state:
+                st.session_state["ecc_sign_private_key"] = ""
+
+            if st.button("Generate ECC Private Key for Signing"):
+                try:
+                    private_key_pem, _ = generate_ecc_keys()
+                    st.session_state["ecc_sign_private_key"] = private_key_pem
+                    st.success("ECC private key for signing generated successfully.")
+                except Exception as e:
+                    st.error(f"Error generating ECC private key: {e}")
+
+            st.text_area("Private Key (PEM Format)", st.session_state["ecc_sign_private_key"], height=150, key="ecc_sign_private_key_area")
+            st.download_button(
+                label="Download Private Key",
+                data=st.session_state["ecc_sign_private_key"],
+                file_name="ecc_sign_private_key.pem",
+                mime="application/x-pem-file"
+            )
+            uploaded_file = st.file_uploader("Upload File to Sign (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="ecc_sign_file")
+
             if st.button("Sign with ECC"):
                 try:
-                    if not private_key_pem or not message:
-                        st.error("Please provide both the private key and the message.")
+                    if not st.session_state["ecc_sign_private_key"]:
+                        st.error("Please generate or provide a private key.")
+                    elif not uploaded_file:
+                        st.error("Please upload a file to sign.")
                     else:
-                        signature = ecc_sign(message, private_key_pem)
+                        file_content = uploaded_file.read()
+                        signature = ecc_sign(file_content, st.session_state["ecc_sign_private_key"])
                         st.text_area("Digital Signature (ECC)", signature, height=100)
-                        
-                        # Provide download link for the result
                         st.download_button(
-                            label="Download Result",
-                            data=BytesIO(signature.encode() if isinstance(signature, str) else signature),
+                            label="Download Signature",
+                            data=BytesIO(signature.encode()),
                             file_name="ecc_signature.txt",
                             mime="application/octet-stream"
                         )
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Error signing with ECC: {e}")
 
         # Verification of Digital Signature Tab
         with tab_verify:
             st.subheader("Verification of Digital Signature")
             public_key_pem = st.text_area("Public Key (PEM Format)", key="verify_public_key")
-            message = st.text_area("Message", key="verify_message")
+            uploaded_file = st.file_uploader("Upload File to Verify (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="verify_file")
             signature = st.text_area("Digital Signature", key="verify_signature")
             algorithm = st.selectbox("Algorithm", ["RSA", "ECC"], key="verify_algorithm")
+
             if st.button("Verify Signature"):
                 try:
-                    if not public_key_pem or not message or not signature:
-                        st.error("Please provide the public key, message, and signature.")
+                    if not public_key_pem or not uploaded_file or not signature:
+                        st.error("Please provide the public key, upload a file, and provide the signature.")
                     else:
-                        is_valid = verify_signature(message, signature, public_key_pem, algorithm)
+                        file_content = uploaded_file.read()
+                        is_valid = verify_signature(file_content, signature, public_key_pem, algorithm)
                         if is_valid:
                             st.success("The signature is valid.")
                         else:
                             st.error("The signature is invalid.")
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Error verifying signature: {e}")
 
 if __name__ == "__main__":
     try:

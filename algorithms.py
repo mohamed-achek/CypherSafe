@@ -59,55 +59,97 @@ def des_decrypt(data, key):
     decrypted_data = cipher.decrypt(decoded_data)
     return decrypted_data.rstrip(b" ")  # Remove padding
 
-# Asymmetric Encryption/Decryption (RSA)
-def rsa_encrypt(data, public_key):
-    public_key_obj = serialization.load_pem_public_key(public_key.encode(), backend=default_backend())
-    ciphertext = public_key_obj.encrypt(
-        data,
-        padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
+# RSA Encryption/Decryption
+def rsa_encrypt(data, public_key_pem):
+    """Encrypt data using RSA public key."""
+    public_key = serialization.load_pem_public_key(public_key_pem.encode(), backend=default_backend())
+    ciphertext = public_key.encrypt(
+        data.encode(),  # Ensure data is encoded to bytes
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
     )
     return encode_binary(ciphertext)
 
-def rsa_decrypt(data, private_key):
-    private_key_obj = serialization.load_pem_private_key(private_key.encode(), password=None, backend=default_backend())
+def rsa_decrypt(data, private_key_pem):
+    """Decrypt data using RSA private key."""
+    private_key = serialization.load_pem_private_key(private_key_pem.encode(), password=None, backend=default_backend())
     decoded_data = decode_binary(data)
-    plaintext = private_key_obj.decrypt(
+    plaintext = private_key.decrypt(
         decoded_data,
-        padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
     )
-    return plaintext
+    return plaintext.decode()  # Decode bytes to string
 
 def generate_rsa_keys():
+    """Generate RSA private and public keys."""
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
     public_key = private_key.public_key()
-    return private_key, public_key
+    private_key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode()  # Convert bytes to string
+    public_key_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()  # Convert bytes to string
+    return private_key_pem, public_key_pem
 
-# ECC Encryption/Decryption (Placeholder for demonstration, as ECC encryption is not natively supported in Python)
-def ecc_encrypt(data, public_key):
-    return f"Encrypted (ECC): {data}"  # Placeholder
+# ECC Encryption/Decryption (Placeholder for demonstration)
+def ecc_encrypt(data, public_key_pem):
+    """Encrypt data using ECC public key (Placeholder)."""
+    # ECC encryption is not natively supported in Python.
+    # This is a placeholder to demonstrate functionality.
+    return f"Encrypted (ECC): {data}"
 
-def ecc_decrypt(data, private_key):
-    return f"Decrypted (ECC): {data}"  # Placeholder
+def ecc_decrypt(data, private_key_pem):
+    """Decrypt data using ECC private key (Placeholder)."""
+    # ECC decryption is not natively supported in Python.
+    # This is a placeholder to demonstrate functionality.
+    return f"Decrypted (ECC): {data}"
 
 def generate_ecc_keys():
+    """Generate ECC private and public keys."""
     private_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())
     public_key = private_key.public_key()
-    return private_key, public_key
+    private_key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode()  # Convert bytes to string
+    public_key_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()  # Convert bytes to string
+    return private_key_pem, public_key_pem
 
 # Hashing (SHA-256)
 def sha256_hash(data):
+    if isinstance(data, str):
+        data = data.encode()  # Convert string to bytes
     digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
     digest.update(data)
     return digest.finalize().hex()
 
 # Hashing (SHA-512)
 def sha512_hash(data):
+    if isinstance(data, str):
+        data = data.encode()  # Convert string to bytes
     digest = hashes.Hash(hashes.SHA512(), backend=default_backend())
     digest.update(data)
     return digest.finalize().hex()
 
 # Hashing (MD5)
 def md5_hash(data):
+    if isinstance(data, str):
+        data = data.encode()  # Convert string to bytes
     digest = hashes.Hash(hashes.MD5(), backend=default_backend())
     digest.update(data)
     return digest.finalize().hex()
