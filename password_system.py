@@ -1,7 +1,7 @@
 import streamlit as st
 import sqlite3
 import mimetypes
-import cv2
+#import cv2
 import numpy as np
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
