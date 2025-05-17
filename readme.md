@@ -1,42 +1,79 @@
-File Encryption, Decryption & Hashing Tool
-Welcome to the File Encryption, Decryption, and Hashing Tool — a simple yet powerful Python-based application for securing your files through modern cryptography and data integrity verification.
+# CypherSafe: File, Image, and Video Encryption, Decryption & Hashing Tool
 
-🚀 Features
-🔒 Encrypt Files using strong symmetric encryption (AES via Fernet).
+Welcome to **CypherSafe** — a modern Python-based application for securing your files, images, and videos using advanced cryptography and AI-based face detection.
 
-🔓 Decrypt Files easily with the correct key.
+---
 
-🔎 Hash Files using various algorithms (SHA-256, MD5, etc.) to verify data integrity.
+## 🚀 Features
 
-📂 Save encrypted files, decrypted outputs, and hash values safely.
+- **🔒 File Encryption/Decryption**
+  - Symmetric: AES, Fernet, DES
+  - Asymmetric: RSA, ECC (ECC is a placeholder for demo)
+- **🖼️ Partial Image Encryption**
+  - Select regions on images to encrypt (with pixelation preview)
+- **🎥 AI-Based Video Face Encryption**
+  - Detects faces in videos using [MediaPipe](https://google.github.io/mediapipe/) and encrypts only face regions
+  - Download encrypted video and metadata for decryption
+- **🔑 Secure Key & IV Generation**
+  - Password-based key derivation and secure random IV generator (base64)
+- **🔎 Hashing**
+  - SHA-256, SHA-512, MD5
+- **✍️ Digital Signatures**
+  - RSA and ECC (sign/verify)
+- **📂 Download Results**
+  - Save encrypted/decrypted files, images, videos, and JSON metadata
 
-🛡️ Secure Key Management (keys are stored securely and separately).
+---
 
-🖥️ Simple User Interface (CLI, optional GUI with Tkinter coming soon).
+## 🛡️ Security Notes
 
+- Keys are generated per session and can be derived from passwords.
+- IVs are generated securely and must be saved for decryption.
+- Encrypted regions metadata (JSON) is required to restore images/videos.
+- Uses [cryptography](https://cryptography.io/) and [mediapipe](https://google.github.io/mediapipe/) for robust security and AI face detection.
 
-🔐 Security Notes
-Keys are generated per encryption session and stored separately.
+---
 
-Keep your keys safe! Losing a key means losing the ability to decrypt files.
+## 🖥️ User Interface
 
-The tool uses Fernet symmetric encryption, ensuring confidentiality and integrity.
+- Built with [Streamlit](https://streamlit.io/) for an intuitive, interactive web UI.
+- Draw rectangles on images to select regions for partial encryption.
+- Upload videos and encrypt/decrypt faces with a single click.
 
-Always verify hashes after transferring critical files.
+---
 
+## 🧰 Requirements
 
-🧟️ Future Improvements
-🎨 Add a full Graphical User Interface (GUI) using Tkinter.
+- Python 3.8+
+- See `requirements.txt` for dependencies:
+  - cryptography
+  - pycryptodome
+  - streamlit
+  - opencv-python-headless
+  - numpy
+  - pillow
+  - streamlit-drawable-canvas
+  - mediapipe
 
-⚙️ Support for batch processing of multiple files at once.
+---
 
-📬 Option to email encryption keys securely.
+## 🧟️ Future Improvements
 
-🗃️ Compress and encrypt entire folders.
+- 🎨 Advanced region selection for videos (beyond faces)
+- ⚙️ Batch processing and folder encryption
+- 📬 Secure key sharing options
+- 📈 Progress bars for large files/videos
 
-📈 Add a progress bar for large file encryption.
+---
 
-⏳ Implement key expiration and regeneration mechanisms.
+## 🤝 Contributing
 
-🤝 Contributing
-Pull requests are welcome! Feel free to open an issue to discuss changes or improvements.
+Pull requests are welcome! Open an issue to discuss changes or improvements.
+
+---
+
+## ⚠️ Disclaimer
+
+- Keep your keys and IVs safe! Losing them means losing access to your encrypted data.
+- ECC encryption is a placeholder and not secure for real use.
+- For production, always review and test cryptographic implementations thoroughly.
