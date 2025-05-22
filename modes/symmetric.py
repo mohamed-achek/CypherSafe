@@ -1,7 +1,8 @@
 import streamlit as st
 from algorithms import aes_encrypt, aes_decrypt, des_encrypt, des_decrypt
 from base64 import b64encode, b64decode
-from database import get_key_from_password
+
+from cypher_safe import get_key_from_password
 
 def symmetric_mode():
     st.header("Symmetric Encryption/Decryption")
