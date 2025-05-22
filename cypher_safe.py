@@ -16,7 +16,7 @@ import numpy as np
 import cv2
 
 # Set the page configuration with a custom icon
-st.set_page_config(page_title="CypherSafe", page_icon="Assets/white_on_trans.png")
+st.set_page_config(page_title="CypherSafe", page_icon="Assets/algorithms.png")
 
 # --- Utility Functions ---
 
@@ -728,22 +728,37 @@ def main():
                 st.subheader("RSA Digital Signature")
                 if "rsa_sign_private_key" not in st.session_state:
                     st.session_state["rsa_sign_private_key"] = ""
+                if "rsa_sign_public_key" not in st.session_state:
+                    st.session_state["rsa_sign_public_key"] = ""
 
-                if st.button("Generate RSA Private Key for Signing"):
+                # Generate both private and public key for signing
+                if st.button("Generate RSA Key Pair for Signing"):
                     try:
-                        private_key_pem, _ = generate_rsa_keys()
+                        private_key_pem, public_key_pem = generate_rsa_keys()
                         st.session_state["rsa_sign_private_key"] = private_key_pem
-                        st.success("RSA private key for signing generated successfully.")
+                        st.session_state["rsa_sign_public_key"] = public_key_pem
+                        st.success("RSA key pair for signing generated successfully.")
                     except Exception as e:
-                        st.error(f"Error generating RSA private key: {e}")
+                        st.error(f"Error generating RSA key pair: {e}")
 
-                st.text_area("Private Key (PEM Format)", st.session_state["rsa_sign_private_key"], height=150, key="rsa_sign_private_key_area")
-                st.download_button(
-                    label="Download Private Key",
-                    data=st.session_state["rsa_sign_private_key"],
-                    file_name="rsa_sign_private_key.pem",
-                    mime="application/x-pem-file"
-                )
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.text_area("Private Key (PEM Format)", st.session_state["rsa_sign_private_key"], height=150, key="rsa_sign_private_key_area")
+                    st.download_button(
+                        label="Download Private Key",
+                        data=st.session_state["rsa_sign_private_key"],
+                        file_name="rsa_sign_private_key.pem",
+                        mime="application/x-pem-file"
+                    )
+                with col2:
+                    st.text_area("Public Key (PEM Format)", st.session_state["rsa_sign_public_key"], height=150, key="rsa_sign_public_key_area")
+                    st.download_button(
+                        label="Download Public Key",
+                        data=st.session_state["rsa_sign_public_key"],
+                        file_name="rsa_sign_public_key.pem",
+                        mime="application/x-pem-file"
+                    )
+
                 uploaded_file = st.file_uploader("Upload File to Sign (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="rsa_sign_file")
 
                 if st.button("Sign with RSA"):
@@ -755,7 +770,7 @@ def main():
                         else:
                             file_content = uploaded_file.read()
                             signature = rsa_sign(file_content, st.session_state["rsa_sign_private_key"])
-                            st.text_area("Digital Signature (RSA)", signature, height=100)
+                            st.text_area("Digital Signature (RSA)", signature, height=100, key="rsa_signature_display")
                             st.download_button(
                                 label="Download Signature",
                                 data=BytesIO(signature.encode()),
@@ -770,22 +785,37 @@ def main():
                 st.subheader("ECC Digital Signature")
                 if "ecc_sign_private_key" not in st.session_state:
                     st.session_state["ecc_sign_private_key"] = ""
+                if "ecc_sign_public_key" not in st.session_state:
+                    st.session_state["ecc_sign_public_key"] = ""
 
-                if st.button("Generate ECC Private Key for Signing"):
+                # Generate both private and public key for signing
+                if st.button("Generate ECC Key Pair for Signing"):
                     try:
-                        private_key_pem, _ = generate_ecc_keys()
+                        private_key_pem, public_key_pem = generate_ecc_keys()
                         st.session_state["ecc_sign_private_key"] = private_key_pem
-                        st.success("ECC private key for signing generated successfully.")
+                        st.session_state["ecc_sign_public_key"] = public_key_pem
+                        st.success("ECC key pair for signing generated successfully.")
                     except Exception as e:
-                        st.error(f"Error generating ECC private key: {e}")
+                        st.error(f"Error generating ECC key pair: {e}")
 
-                st.text_area("Private Key (PEM Format)", st.session_state["ecc_sign_private_key"], height=150, key="ecc_sign_private_key_area")
-                st.download_button(
-                    label="Download Private Key",
-                    data=st.session_state["ecc_sign_private_key"],
-                    file_name="ecc_sign_private_key.pem",
-                    mime="application/x-pem-file"
-                )
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.text_area("Private Key (PEM Format)", st.session_state["ecc_sign_private_key"], height=150, key="ecc_sign_private_key_area")
+                    st.download_button(
+                        label="Download Private Key",
+                        data=st.session_state["ecc_sign_private_key"],
+                        file_name="ecc_sign_private_key.pem",
+                        mime="application/x-pem-file"
+                    )
+                with col2:
+                    st.text_area("Public Key (PEM Format)", st.session_state["ecc_sign_public_key"], height=150, key="ecc_sign_public_key_area")
+                    st.download_button(
+                        label="Download Public Key",
+                        data=st.session_state["ecc_sign_public_key"],
+                        file_name="ecc_sign_public_key.pem",
+                        mime="application/x-pem-file"
+                    )
+
                 uploaded_file = st.file_uploader("Upload File to Sign (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="ecc_sign_file")
 
                 if st.button("Sign with ECC"):
@@ -797,7 +827,7 @@ def main():
                         else:
                             file_content = uploaded_file.read()
                             signature = ecc_sign(file_content, st.session_state["ecc_sign_private_key"])
-                            st.text_area("Digital Signature (ECC)", signature, height=100)
+                            st.text_area("Digital Signature (ECC)", signature, height=100, key="ecc_signature_display")
                             st.download_button(
                                 label="Download Signature",
                                 data=BytesIO(signature.encode()),
@@ -810,7 +840,12 @@ def main():
             # Verification of Digital Signature Tab
             with tab_verify:
                 st.subheader("Verification of Digital Signature")
-                public_key_pem = st.text_area("Public Key (PEM Format)", key="verify_public_key")
+                # Add upload public key option
+                uploaded_public_key = st.file_uploader("Upload Public Key (PEM Format)", type=["pem"], key="verify_upload_public_key")
+                if uploaded_public_key:
+                    public_key_pem = uploaded_public_key.read().decode()
+                else:
+                    public_key_pem = st.text_area("Public Key (PEM Format)", key="verify_public_key")
                 uploaded_file = st.file_uploader("Upload File to Verify (Text, Image, or Video)", type=["txt", "png", "jpg", "jpeg", "mp4"], key="verify_file")
                 signature = st.text_area("Digital Signature", key="verify_signature")
                 algorithm = st.selectbox("Algorithm", ["RSA", "ECC"], key="verify_algorithm")
