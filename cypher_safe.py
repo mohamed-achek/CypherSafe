@@ -13,6 +13,10 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 from cryptography.fernet import Fernet  # Import Fernet for symmetric encryption
 from modes.im_vid import partial_encrypt_image, partial_decrypt_image
+import face_recognition
+import numpy as np
+import cv2
+from PIL import Image
 
 # Set the page configuration with a custom icon
 st.set_page_config(page_title="CypherSafe", page_icon="Assets/white_on_trans.png")
@@ -114,36 +118,91 @@ def key_input_with_generator(label, session_key, password_key, btn_key, truncate
     return key_val
 
 def iv_input_with_generator(label, session_key, btn_key, help_text=None):
-    """Streamlit input for IV with secure random generator and session state update."""
+    """Streamlit input for IV with secure random generator and session state update. Autofills IV field on generate."""
     import streamlit as st
     from base64 import b64encode
     import secrets
+    # Use session state for IV value
     iv_val = st.text_input(label, value=st.session_state.get(session_key, ""), type="password", key=session_key, help=help_text)
+    generated_iv = None
     with st.expander("Generate IV (16 bytes, base64)"):
         if st.button("Generate IV", key=btn_key):
             iv = secrets.token_bytes(16)
-            st.session_state["video_iv_generated"] = b64encode(iv).decode()
-            st.success("IV generated successfully.")
+            generated_iv = b64encode(iv).decode()
+            st.session_state["video_iv_generated"] = generated_iv
+            st.success("IV generated. Copy and paste it into the IV field above.")
         iv_display = st.session_state.get("video_iv_generated", "")
         st.text_input("Generated IV (copy to IV field above)", value=iv_display, key="video_iv_generated_display", disabled=True)
     return iv_val
 
+# --- Face Recognition Login Integration ---
+def face_login():
+    import os
+    import face_recognition
+    import numpy as np
+    import cv2
+    st.title("Face Recognition Login")
+    if "login_state" not in st.session_state:
+        st.session_state["login_state"] = False
+    if not st.session_state["login_state"]:
+        st.write("Please look at the camera. Face recognition will happen automatically.")
+        # Use camera_input with a unique key to force refresh on rerun
+        camera_image = st.camera_input("Camera feed (face recognition will happen automatically)", key=str(hash(str(st.session_state.get('face_login_rerun', 0)))))
+        if camera_image is not None:
+            user_dir = "users"
+            user_files = [f for f in os.listdir(user_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+            known_encodings = []
+            user_names = []
+            for user_file in user_files:
+                try:
+                    user_path = os.path.join(user_dir, user_file)
+                    user_image = face_recognition.load_image_file(user_path)
+                    encodings = face_recognition.face_encodings(user_image)
+                    if encodings:
+                        known_encodings.append(encodings[0])
+                        username = os.path.splitext(user_file)[0].replace('_user', '')
+                        user_names.append(username)
+                except Exception:
+                    continue
+            if not known_encodings:
+                st.error("No valid user face images found in the users/ directory.")
+                st.stop()
+            img = Image.open(camera_image)
+            img_array = np.array(img)
+            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+            unknown_encodings = face_recognition.face_encodings(img_bgr)
+            if not unknown_encodings:
+                st.info("No face detected in the camera frame. Please look at the camera.")
+                st.session_state['face_login_rerun'] = st.session_state.get('face_login_rerun', 0) + 1
+                st.rerun_rerun()
+            matches = face_recognition.compare_faces(known_encodings, unknown_encodings[0])
+            if any(matches):
+                matched_index = matches.index(True)
+                matched_user = user_names[matched_index]
+                st.success(f"Face recognized! Login successful. Welcome, {matched_user}.")
+                st.session_state["login_state"] = True
+                st.session_state["current_user"] = matched_user
+                st.session_state['face_login_rerun'] = 0
+                st.rerun_rerun()
+            else:
+                st.warning("Face not recognized. Please try again or adjust your position.")
+                st.session_state['face_login_rerun'] = st.session_state.get('face_login_rerun', 0) + 1
+                st.rerun_rerun()
+    return st.session_state["login_state"]
+
 def main():
+    # --- Face login required ---
+    if not face_login():
+        st.stop()
+
     # Initialize the database
     init_db()
 
-    # Display the logo at the top of the app
-    try:
-        st.image("Assets/white_on_trans.png", width=200)  # Adjust the width as needed
-    except FileNotFoundError:
-        st.warning("Logo not found. Ensure 'Assets/original.png' exists.")
-    st.title("CypherSafe")
-
     st.sidebar.title("Navigation")
     try:
-        st.sidebar.image("Assets/algo.png", width=200)  # Adjust the width as needed
+        st.sidebar.image("Assets/algorithms.png", width=200)  # Adjust the width as needed
     except FileNotFoundError:
-        st.warning("Sidebar image not found. Ensure 'Assets/algo.png' exists.")
+        st.warning("Sidebar image not found. Ensure 'Assets/algorithms.png' exists.")
 
     # Completely separate navigation for image encryption
     page = st.sidebar.radio(
@@ -181,18 +240,18 @@ def main():
                     st.session_state["aes_key_temp"] = ""
 
                 key = st.text_input("Key (16 bytes)", value=st.session_state["aes_key_temp"], type="password", key="aes_key")
-                
-                if st.button("Generate AES Key"):
+                with st.expander("Generate Key from Password"):
                     password = st.text_input("Enter Password for Key Generation", type="password", key="aes_password")
-                    if password:
-                        try:
-                            generated_key = get_key_from_password(password, truncate_to=16)  # Truncate to 16 bytes for AES
-                            st.session_state["aes_key_temp"] = b64encode(generated_key).decode()  # Update the temporary variable
-                            st.success("AES Key generated successfully.")
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-                    else:
-                        st.error("Please enter a password to generate a key.")
+                    if st.button("Generate AES Key", key="aes_btn_generate_key"):
+                        if password:
+                            try:
+                                generated_key = get_key_from_password(password, truncate_to=16)  # Truncate to 16 bytes for AES
+                                st.session_state["aes_key_temp"] = b64encode(generated_key).decode()  # Update the temporary variable
+                                st.success("AES Key generated successfully.")
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+                        else:
+                            st.error("Please enter a password to generate a key.")
 
                 operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="aes_operation")
 
@@ -238,18 +297,18 @@ def main():
                     st.session_state["fernet_key_temp"] = ""
 
                 key = st.text_input("Key", value=st.session_state["fernet_key_temp"], type="password", key="fernet_key")
-                
-                if st.button("Generate Fernet Key"):
+                with st.expander("Generate Key from Password"):
                     password = st.text_input("Enter Password for Key Generation", type="password", key="fernet_password")
-                    if password:
-                        try:
-                            fernet_key = get_key_from_password(password)  # Use the full 32-byte key for Fernet
-                            st.session_state["fernet_key_temp"] = b64encode(fernet_key).decode()  # Update the temporary variable
-                            st.success("Fernet Key generated successfully.")
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-                    else:
-                        st.error("Please enter a password to generate a key.")
+                    if st.button("Generate Fernet Key", key="fernet_btn_generate_key"):
+                        if password:
+                            try:
+                                fernet_key = get_key_from_password(password)  # Use the full 32-byte key for Fernet
+                                st.session_state["fernet_key_temp"] = b64encode(fernet_key).decode()  # Update the temporary variable
+                                st.success("Fernet Key generated successfully.")
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+                        else:
+                            st.error("Please enter a password to generate a key.")
 
                 operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="fernet_operation")
 
@@ -287,21 +346,21 @@ def main():
                     st.session_state["des_key_temp"] = ""
 
                 key = st.text_input("Key (8 bytes)", value=st.session_state["des_key_temp"], type="password", key="des_key_input")
-                
-                if st.button("Generate DES Key"):
+                with st.expander("Generate Key from Password"):
                     password = st.text_input("Enter Password for Key Generation", type="password", key="des_password")
-                    if password:
-                        try:
-                            des_key = get_key_from_password(password, truncate_to=8)  # Truncate to 8 bytes for DES
-                            if len(des_key) != 8:
-                                st.error("Generated key is not 8 bytes. Please try again.")
-                            else:
-                                st.session_state["des_key_temp"] = b64encode(des_key).decode()  # Update the temporary variable
-                                st.success("DES Key generated successfully.")
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-                    else:
-                        st.error("Please enter a password to generate a key.")
+                    if st.button("Generate DES Key", key="des_btn_generate_key"):
+                        if password:
+                            try:
+                                des_key = get_key_from_password(password, truncate_to=8)  # Truncate to 8 bytes for DES
+                                if len(des_key) != 8:
+                                    st.error("Generated key is not 8 bytes. Please try again.")
+                                else:
+                                    st.session_state["des_key_temp"] = b64encode(des_key).decode()  # Update the temporary variable
+                                    st.success("DES Key generated successfully.")
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+                        else:
+                            st.error("Please enter a password to generate a key.")
 
                 operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="des_operation")
 

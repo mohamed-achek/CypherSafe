@@ -1,5 +1,6 @@
 .env
 .venv/
+.venv310/
 venv/
 cyph/
 __pycache__

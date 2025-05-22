@@ -1,5 +1,6 @@
 import streamlit as st
 from algorithms import rsa_encrypt, rsa_decrypt, generate_rsa_keys, ecc_encrypt, ecc_decrypt, generate_ecc_keys
+from cryptography.hazmat.primitives import serialization
 
 def asymmetric_mode():
     st.header("Asymmetric Encryption/Decryption")
