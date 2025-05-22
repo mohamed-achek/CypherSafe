@@ -152,8 +152,8 @@ def face_login():
     if "login_state" not in st.session_state:
         st.session_state["login_state"] = False
     if not st.session_state["login_state"]:
-        st.write("Please look at the camera. Face recognition will happen automatically.")
-        camera_image = st.camera_input("Camera feed (face recognition will happen automatically)", key=str(hash(str(st.session_state.get('face_login_rerun', 0)))))
+        st.write("Please look at the camera")
+        camera_image = st.camera_input("📷 Camera feed", key=str(hash(str(st.session_state.get('face_login_rerun', 0)))))
         if camera_image is not None:
             user_dir = "users"
             user_files = [f for f in os.listdir(user_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
@@ -840,17 +840,35 @@ def main():
             algorithm = st.selectbox("Select Algorithm", ["AES"], key="imgenc_algorithm_partial")
             operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="imgenc_operation_partial")
             uploaded_media = st.file_uploader("Upload an Image", type=["png", "jpg", "jpeg"], key="imgenc_file_partial")
-            if "imgenc_key_temp" not in st.session_state:
-                st.session_state["imgenc_key_temp"] = ""
-            key = key_input_with_generator(
-                "Key (16 bytes for AES)", "imgenc_key_temp", "imgenc_password", "imgenc_btn_generate_key", truncate_to=16
+            
+            # Use a separate key for the generated key and always use it as the value for the text_input
+            if "imgenc_generated_key" not in st.session_state:
+                st.session_state["imgenc_generated_key"] = ""
+            key = st.text_input(
+                "Key (16 bytes for AES)",
+                value=st.session_state["imgenc_generated_key"],
+                type="password",
+                key="imgenc_key_temp"
             )
-            # Password strength tester for key generation
-            imgenc_password = st.session_state.get("imgenc_password", "")
-            if imgenc_password:
-                score, msg = password_strength(imgenc_password)
-                st.progress(score / 4)
-                st.info(f"Password Strength: {msg}")
+            with st.expander("Generate Key from Password"):
+                password = st.text_input("Enter Password for Key Generation", type="password", key="imgenc_password")
+                if password:
+                    score, msg = password_strength(password)
+                    st.progress(score / 4)
+                    st.info(f"Password Strength: {msg}")
+                if st.button("Generate Key", key="imgenc_btn_generate_key"):
+                    if not password or len(password) < 8:
+                        st.error("Password must be at least 8 characters long.")
+                    else:
+                        try:
+                            generated_key = get_key_from_password(password, truncate_to=16)
+                            st.session_state["imgenc_generated_key"] = b64encode(generated_key).decode()
+                            st.success("Key generated successfully.")
+                            st.experimental_rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
+            # ...existing code for password strength tester, region selection, encryption, decryption...
             regions = []
             show_canvas = True
             if uploaded_media and uploaded_media.type.startswith("image/"):
@@ -955,27 +973,37 @@ def main():
                             elif algorithm == "AES":
                                 protected_img, encrypted_regions_json = partial_encrypt_image(media_bytes, regions, key=decoded_key)
                                 st.session_state["imgenc_encrypted_regions"] = encrypted_regions_json
+                                # Store both in session state for persistent download buttons
+                                st.session_state["imgenc_protected_img"] = protected_img
+                                st.session_state["imgenc_protected_img_name"] = uploaded_media.name
                                 st.success("Partial encryption applied to selected regions. Save the encrypted regions data for decryption.")
                                 st.image(BytesIO(protected_img), caption="Partially Encrypted Image")
-                                col_img, col_json = st.columns(2)
-                                with col_img:
-                                    st.download_button(
-                                        label="Download Partially Encrypted Image",
-                                        data=protected_img,
-                                        file_name=f"partial_encrypted_{uploaded_media.name}",
-                                        mime="image/png",
-                                        key=f"download_img_{uploaded_media.name}"
-                                    )
-                                with col_json:
-                                    st.download_button(
-                                        label="Download Encrypted Regions Data (JSON)",
-                                        data=encrypted_regions_json,
-                                        file_name=f"encrypted_regions_{uploaded_media.name}.json",
-                                        mime="application/json",
-                                        key=f"download_json_{uploaded_media.name}"
-                                    )
                 except Exception as e:
                     st.error(f"Error: {e}")
+
+            # Always show both download buttons if both are available in session state
+            if (
+                st.session_state.get("imgenc_protected_img") is not None
+                and st.session_state.get("imgenc_encrypted_regions")
+                and st.session_state.get("imgenc_protected_img_name")
+            ):
+                col_img, col_json = st.columns(2)
+                with col_img:
+                    st.download_button(
+                        label="Download Partially Encrypted Image",
+                        data=st.session_state["imgenc_protected_img"],
+                        file_name=f"partial_encrypted_{st.session_state['imgenc_protected_img_name']}",
+                        mime="image/png",
+                        key=f"download_img_{st.session_state['imgenc_protected_img_name']}"
+                    )
+                with col_json:
+                    st.download_button(
+                        label="Download Encrypted Regions Data (JSON)",
+                        data=st.session_state["imgenc_encrypted_regions"],
+                        file_name=f"encrypted_regions_{st.session_state['imgenc_protected_img_name']}.json",
+                        mime="application/json",
+                        key=f"download_json_{st.session_state['imgenc_protected_img_name']}"
+                    )
 
             if decrypt_clicked:
                 try:
@@ -1020,17 +1048,34 @@ def main():
             video_algorithm = st.selectbox("Select Algorithm", ["AES"], key="video_algorithm")
             video_operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="video_operation")
             uploaded_video = st.file_uploader("Upload a Video", type=["mp4"], key="imgenc_file_video")
-            if "video_key_temp" not in st.session_state:
-                st.session_state["video_key_temp"] = ""
-            video_key = key_input_with_generator(
-                "Key (16 bytes for AES)", "video_key_temp", "video_password", "video_btn_generate_key", truncate_to=16
+            
+            # Use a separate key for the generated key and always use it as the value for the text_input
+            if "video_generated_key" not in st.session_state:
+                st.session_state["video_generated_key"] = ""
+            video_key = st.text_input(
+                "Key (16 bytes for AES)",
+                value=st.session_state["video_generated_key"],
+                type="password",
+                key="video_key_temp"
             )
-            # Password strength tester for key generation
-            video_password = st.session_state.get("video_password", "")
-            if video_password:
-                score, msg = password_strength(video_password)
-                st.progress(score / 4)
-                st.info(f"Password Strength: {msg}")
+            with st.expander("Generate Key from Password"):
+                password = st.text_input("Enter Password for Key Generation", type="password", key="video_password")
+                if password:
+                    score, msg = password_strength(password)
+                    st.progress(score / 4)
+                    st.info(f"Password Strength: {msg}")
+                if st.button("Generate Key", key="video_btn_generate_key"):
+                    if not password or len(password) < 8:
+                        st.error("Password must be at least 8 characters long.")
+                    else:
+                        try:
+                            generated_key = get_key_from_password(password, truncate_to=16)
+                            st.session_state["video_generated_key"] = b64encode(generated_key).decode()
+                            st.success("Key generated successfully.")
+                            st.experimental_rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
             video_iv = iv_input_with_generator("IV (16 bytes, base64)", "video_iv", "video_btn_generate_iv")
             if video_operation == "Encrypt":
                 # Always show both download buttons after encryption, using session state to store results
