@@ -1,7 +1,6 @@
 import streamlit as st
 import sqlite3
-import mimetypes
-#import cv2
+import cv2
 import numpy as np
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
@@ -12,7 +11,6 @@ from base64 import b64encode, b64decode
 from io import BytesIO
 from datetime import datetime
 import secrets
-import os
 from PIL import Image
 
 # Initialize SQLite database
@@ -127,6 +125,32 @@ def get_existing_key(file_name: str) -> (bytes, bytes):
     conn.close()
     return row if row else None
 
+def password_strength(password: str):
+    """Return a score (0-4) and message for password strength."""
+    import re
+    score = 0
+    if len(password) >= 8:
+        score += 1
+    if re.search(r"[A-Z]", password):
+        score += 1
+    if re.search(r"[a-z]", password):
+        score += 1
+    if re.search(r"\d", password):
+        score += 1
+    if re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        score += 1
+    if score == 0:
+        msg = "Very Weak"
+    elif score == 1:
+        msg = "Weak"
+    elif score == 2:
+        msg = "Moderate"
+    elif score == 3:
+        msg = "Strong"
+    else:
+        msg = "Very Strong"
+    return min(score, 4), msg
+
 # Main Streamlit UI
 def main():
     st.title("CypherSafe - Password-Based Encryption System")
@@ -143,6 +167,11 @@ def main():
         st.header("Encrypt a File")
         uploaded_file = st.file_uploader("Upload a File", type=None)
         password = st.text_input("Enter Password", type="password", key="encrypt_password")
+        # Password strength tester
+        if password:
+            score, msg = password_strength(password)
+            st.progress(score / 4)
+            st.info(f"Password Strength: {msg}")
         algorithm = st.selectbox("Select Algorithm", ["AES-GCM", "Fernet", "DES"])
         blur_option = st.checkbox("Apply Blur (Images Only)")
         blur_strength = st.slider("Blur Strength", 5, 99, 15, step=2) if blur_option else None
@@ -194,6 +223,11 @@ def main():
         st.header("Decrypt a File")
         uploaded_file = st.file_uploader("Upload an Encrypted File", type=None)
         password = st.text_input("Enter Password", type="password", key="decrypt_password")
+        # Password strength tester (optional for decryption, but shown for user feedback)
+        if password:
+            score, msg = password_strength(password)
+            st.progress(score / 4)
+            st.info(f"Password Strength: {msg}")
         algorithm = st.selectbox("Select Algorithm", ["AES-GCM", "Fernet", "DES"])
 
         if st.button("Decrypt"):

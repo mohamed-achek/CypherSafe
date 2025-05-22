@@ -3,26 +3,25 @@ from algorithms import *
 from base64 import b64encode, b64decode
 import os
 from io import BytesIO
-from PIL import Image  # Import for image processing
-from password_system import main as password_system_main  # Import the password system
+from PIL import Image
 import sqlite3
 import secrets
 from datetime import datetime
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
-from cryptography.fernet import Fernet  # Import Fernet for symmetric encryption
+from cryptography.fernet import Fernet
 from modes.im_vid import partial_encrypt_image, partial_decrypt_image
-import face_recognition
 import numpy as np
 import cv2
-from PIL import Image
 
 # Set the page configuration with a custom icon
 st.set_page_config(page_title="CypherSafe", page_icon="Assets/white_on_trans.png")
 
+# --- Utility Functions ---
+
 def pixelate_image(image_data):
-    """Apply pixelation effect to an image."""
+    """Apply pixelation effect to an image for demonstration/obfuscation."""
     image = Image.open(BytesIO(image_data))
     small = image.resize((image.width // 10, image.height // 10), resample=Image.BILINEAR)
     pixelated = small.resize(image.size, Image.NEAREST)
@@ -31,22 +30,25 @@ def pixelate_image(image_data):
     return output.getvalue()
 
 def get_key_from_password(password: str, truncate_to: int = 32) -> bytes:
-    """Retrieve or generate a key for the given password, truncated to the required length."""
+    """
+    Retrieve or generate a key for the given password, truncated to the required length.
+    Uses a database to persist salt for password-key mapping.
+    """
     conn = sqlite3.connect("cyphersafe.db")
     cursor = conn.cursor()
     cursor.execute("SELECT salt FROM encrypted_keys WHERE password = ?", (password,))
-    row = cursor.fetchone()  # <-- fix: use cursor.fetchone(), not conn.fetchone()
+    row = cursor.fetchone()
     conn.close()
 
     if row:
         salt = row[0]
-        full_key = derive_key(password, salt)  # Derive the full 32-byte key
+        full_key = derive_key(password, salt)
         st.info("Using existing key associated with this password.")
     else:
         salt = secrets.token_bytes(16)
-        full_key = derive_key(password, salt)  # Generate a new full 32-byte key
+        full_key = derive_key(password, salt)
         st.success("New key generated for this password.")
-        # Insert the new key into the database
+        # Store the new salt for this password
         conn = sqlite3.connect("cyphersafe.db")
         cursor = conn.cursor()
         cursor.execute("""
@@ -56,13 +58,13 @@ def get_key_from_password(password: str, truncate_to: int = 32) -> bytes:
         conn.commit()
         conn.close()
 
-    return full_key[:truncate_to]  # Truncate the key to the required length
+    return full_key[:truncate_to]
 
 def derive_key(password: str, salt: bytes) -> bytes:
     """Derive a cryptographic key from a password using PBKDF2."""
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
-        length=32,  # Derive a 32-byte key
+        length=32,
         salt=salt,
         iterations=100000,
         backend=default_backend()
@@ -84,10 +86,11 @@ def init_db():
     conn.commit()
     conn.close()
 
-# --- Helper Functions for UI and Validation ---
 def get_b64_decoded_key(key_str, expected_len=16):
-    """Decode a base64 key string or return as bytes if already correct length."""
-    from base64 import b64decode
+    """
+    Decode a base64 key string or return as bytes if already correct length.
+    Used for key validation.
+    """
     if len(key_str) == expected_len:
         return key_str.encode()
     try:
@@ -99,30 +102,34 @@ def get_b64_decoded_key(key_str, expected_len=16):
     return None
 
 def key_input_with_generator(label, session_key, password_key, btn_key, truncate_to=16, help_text=None):
-    """Streamlit input for key with password-based generator and session state update."""
-    import streamlit as st
-    from base64 import b64encode
+    """
+    Streamlit input for key with password-based generator and session state update.
+    Includes password strength validation and enforces minimum length.
+    """
     key_val = st.text_input(label, value=st.session_state.get(session_key, ""), type="password", key=session_key, help=help_text)
     with st.expander("Generate Key from Password"):
         password = st.text_input("Enter Password for Key Generation", type="password", key=password_key)
+        if password:
+            score, msg = password_strength(password)
+            st.progress(score / 4)
+            st.info(f"Password Strength: {msg}")
         if st.button("Generate Key", key=btn_key):
-            if password:
+            if not password or len(password) < 8:
+                st.error("Password must be at least 8 characters long.")
+            else:
                 try:
                     generated_key = get_key_from_password(password, truncate_to=truncate_to)
                     st.session_state[session_key] = b64encode(generated_key).decode()
                     st.success("Key generated successfully.")
                 except Exception as e:
                     st.error(f"Error: {e}")
-            else:
-                st.error("Please enter a password to generate a key.")
     return key_val
 
 def iv_input_with_generator(label, session_key, btn_key, help_text=None):
-    """Streamlit input for IV with secure random generator and session state update. Autofills IV field on generate."""
-    import streamlit as st
-    from base64 import b64encode
-    import secrets
-    # Use session state for IV value
+    """
+    Streamlit input for IV with secure random generator and session state update.
+    Autofills IV field on generate.
+    """
     iv_val = st.text_input(label, value=st.session_state.get(session_key, ""), type="password", key=session_key, help=help_text)
     generated_iv = None
     with st.expander("Generate IV (16 bytes, base64)"):
@@ -137,16 +144,15 @@ def iv_input_with_generator(label, session_key, btn_key, help_text=None):
 
 # --- Face Recognition Login Integration ---
 def face_login():
-    import os
+    """
+    Perform face recognition login using camera input and known user images.
+    """
     import face_recognition
-    import numpy as np
-    import cv2
     st.title("Face Recognition Login")
     if "login_state" not in st.session_state:
         st.session_state["login_state"] = False
     if not st.session_state["login_state"]:
         st.write("Please look at the camera. Face recognition will happen automatically.")
-        # Use camera_input with a unique key to force refresh on rerun
         camera_image = st.camera_input("Camera feed (face recognition will happen automatically)", key=str(hash(str(st.session_state.get('face_login_rerun', 0)))))
         if camera_image is not None:
             user_dir = "users"
@@ -190,7 +196,41 @@ def face_login():
                 st.rerun_rerun()
     return st.session_state["login_state"]
 
+# --- Password Strength Tester ---
+def password_strength(password: str):
+    """
+    Return a score (0-4) and message for password strength.
+    Used for user feedback and validation.
+    """
+    import re
+    score = 0
+    if len(password) >= 8:
+        score += 1
+    if re.search(r"[A-Z]", password):
+        score += 1
+    if re.search(r"[a-z]", password):
+        score += 1
+    if re.search(r"\d", password):
+        score += 1
+    if re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        score += 1
+    if score == 0:
+        msg = "Very Weak"
+    elif score == 1:
+        msg = "Weak"
+    elif score == 2:
+        msg = "Moderate"
+    elif score == 3:
+        msg = "Strong"
+    else:
+        msg = "Very Strong"
+    return min(score, 4), msg
+
 def main():
+    """
+    Main entry point for the CypherSafe Streamlit app.
+    Handles navigation, login, and all cryptographic UI logic.
+    """
     # --- Face login required ---
     if not face_login():
         st.stop()
@@ -200,11 +240,11 @@ def main():
 
     st.sidebar.title("Navigation")
     try:
-        st.sidebar.image("Assets/algorithms.png", width=200)  # Adjust the width as needed
+        st.sidebar.image("Assets/algorithms.png", width=200)
     except FileNotFoundError:
         st.warning("Sidebar image not found. Ensure 'Assets/algorithms.png' exists.")
 
-    # Completely separate navigation for image encryption
+    # Navigation: Algorithms or Image/Video Encryption
     page = st.sidebar.radio(
         "Go to",
         [
@@ -214,6 +254,7 @@ def main():
         key="main_page"
     )
 
+    # --- Algorithms Section ---
     if page == "Algorithms":
         mode = st.sidebar.selectbox(
             "Select Mode",
@@ -226,6 +267,7 @@ def main():
             key="main_mode"
         )
 
+        # --- Symmetric Encryption/Decryption ---
         if mode == "Symmetric":
             st.header("Symmetric Encryption/Decryption")
             tab_aes, tab_fernet, tab_des = st.tabs(["AES", "Fernet", "DES"])
@@ -242,16 +284,21 @@ def main():
                 key = st.text_input("Key (16 bytes)", value=st.session_state["aes_key_temp"], type="password", key="aes_key")
                 with st.expander("Generate Key from Password"):
                     password = st.text_input("Enter Password for Key Generation", type="password", key="aes_password")
+                    # Password strength tester for key generation
+                    if password:
+                        score, msg = password_strength(password)
+                        st.progress(score / 4)
+                        st.info(f"Password Strength: {msg}")
                     if st.button("Generate AES Key", key="aes_btn_generate_key"):
-                        if password:
+                        if not password or len(password) < 8:
+                            st.error("Password must be at least 8 characters long.")
+                        else:
                             try:
                                 generated_key = get_key_from_password(password, truncate_to=16)  # Truncate to 16 bytes for AES
                                 st.session_state["aes_key_temp"] = b64encode(generated_key).decode()  # Update the temporary variable
                                 st.success("AES Key generated successfully.")
                             except Exception as e:
                                 st.error(f"Error: {e}")
-                        else:
-                            st.error("Please enter a password to generate a key.")
 
                 operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="aes_operation")
 
@@ -299,16 +346,21 @@ def main():
                 key = st.text_input("Key", value=st.session_state["fernet_key_temp"], type="password", key="fernet_key")
                 with st.expander("Generate Key from Password"):
                     password = st.text_input("Enter Password for Key Generation", type="password", key="fernet_password")
+                    # Password strength tester for key generation
+                    if password:
+                        score, msg = password_strength(password)
+                        st.progress(score / 4)
+                        st.info(f"Password Strength: {msg}")
                     if st.button("Generate Fernet Key", key="fernet_btn_generate_key"):
-                        if password:
+                        if not password or len(password) < 8:
+                            st.error("Password must be at least 8 characters long.")
+                        else:
                             try:
                                 fernet_key = get_key_from_password(password)  # Use the full 32-byte key for Fernet
                                 st.session_state["fernet_key_temp"] = b64encode(fernet_key).decode()  # Update the temporary variable
                                 st.success("Fernet Key generated successfully.")
                             except Exception as e:
                                 st.error(f"Error: {e}")
-                        else:
-                            st.error("Please enter a password to generate a key.")
 
                 operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="fernet_operation")
 
@@ -348,8 +400,14 @@ def main():
                 key = st.text_input("Key (8 bytes)", value=st.session_state["des_key_temp"], type="password", key="des_key_input")
                 with st.expander("Generate Key from Password"):
                     password = st.text_input("Enter Password for Key Generation", type="password", key="des_password")
+                    if password:
+                        score, msg = password_strength(password)
+                        st.progress(score / 4)
+                        st.info(f"Password Strength: {msg}")
                     if st.button("Generate DES Key", key="des_btn_generate_key"):
-                        if password:
+                        if not password or len(password) < 8:
+                            st.error("Password must be at least 8 characters long.")
+                        else:
                             try:
                                 des_key = get_key_from_password(password, truncate_to=8)  # Truncate to 8 bytes for DES
                                 if len(des_key) != 8:
@@ -359,8 +417,6 @@ def main():
                                     st.success("DES Key generated successfully.")
                             except Exception as e:
                                 st.error(f"Error: {e}")
-                        else:
-                            st.error("Please enter a password to generate a key.")
 
                 operation = st.selectbox("Operation", ["Encrypt", "Decrypt"], key="des_operation")
 
@@ -391,6 +447,7 @@ def main():
                     except Exception as e:
                         st.error(f"Error: {e}")
 
+        # --- Asymmetric Encryption/Decryption ---
         elif mode == "Asymmetric":
             st.header("Asymmetric Encryption/Decryption")
             tab_rsa, tab_ecc = st.tabs(["RSA", "ECC"])
@@ -587,6 +644,7 @@ def main():
                         except Exception as e:
                             st.error(f"Error decrypting with ECC: {e}")
 
+        # --- Hashing ---
         elif mode == "Hashing":
             st.header("Hashing")
             tab_sha256, tab_sha512, tab_md5 = st.tabs(["SHA-256", "SHA-512", "MD5"])
@@ -660,6 +718,7 @@ def main():
                     except Exception as e:
                         st.error(f"Error: {e}")
 
+        # --- Digital Signature ---
         elif mode == "Digital Signature":
             st.header("Digital Signature")
             tab_rsa_sign, tab_ecc_sign, tab_verify = st.tabs(["RSA Digital Signature", "ECC Digital Signature", "Verification of Digital Signature"])
@@ -786,6 +845,12 @@ def main():
             key = key_input_with_generator(
                 "Key (16 bytes for AES)", "imgenc_key_temp", "imgenc_password", "imgenc_btn_generate_key", truncate_to=16
             )
+            # Password strength tester for key generation
+            imgenc_password = st.session_state.get("imgenc_password", "")
+            if imgenc_password:
+                score, msg = password_strength(imgenc_password)
+                st.progress(score / 4)
+                st.info(f"Password Strength: {msg}")
             regions = []
             show_canvas = True
             if uploaded_media and uploaded_media.type.startswith("image/"):
@@ -960,6 +1025,12 @@ def main():
             video_key = key_input_with_generator(
                 "Key (16 bytes for AES)", "video_key_temp", "video_password", "video_btn_generate_key", truncate_to=16
             )
+            # Password strength tester for key generation
+            video_password = st.session_state.get("video_password", "")
+            if video_password:
+                score, msg = password_strength(video_password)
+                st.progress(score / 4)
+                st.info(f"Password Strength: {msg}")
             video_iv = iv_input_with_generator("IV (16 bytes, base64)", "video_iv", "video_btn_generate_iv")
             if video_operation == "Encrypt":
                 # Always show both download buttons after encryption, using session state to store results
