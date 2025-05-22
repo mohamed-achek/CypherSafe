@@ -80,6 +80,54 @@ def init_db():
     conn.commit()
     conn.close()
 
+# --- Helper Functions for UI and Validation ---
+def get_b64_decoded_key(key_str, expected_len=16):
+    """Decode a base64 key string or return as bytes if already correct length."""
+    from base64 import b64decode
+    if len(key_str) == expected_len:
+        return key_str.encode()
+    try:
+        decoded = b64decode(key_str)
+        if len(decoded) == expected_len:
+            return decoded
+    except Exception:
+        pass
+    return None
+
+def key_input_with_generator(label, session_key, password_key, btn_key, truncate_to=16, help_text=None):
+    """Streamlit input for key with password-based generator and session state update."""
+    import streamlit as st
+    from base64 import b64encode
+    key_val = st.text_input(label, value=st.session_state.get(session_key, ""), type="password", key=session_key, help=help_text)
+    with st.expander("Generate Key from Password"):
+        password = st.text_input("Enter Password for Key Generation", type="password", key=password_key)
+        if st.button("Generate Key", key=btn_key):
+            if password:
+                try:
+                    generated_key = get_key_from_password(password, truncate_to=truncate_to)
+                    st.session_state[session_key] = b64encode(generated_key).decode()
+                    st.success("Key generated successfully.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+            else:
+                st.error("Please enter a password to generate a key.")
+    return key_val
+
+def iv_input_with_generator(label, session_key, btn_key, help_text=None):
+    """Streamlit input for IV with secure random generator and session state update."""
+    import streamlit as st
+    from base64 import b64encode
+    import secrets
+    iv_val = st.text_input(label, value=st.session_state.get(session_key, ""), type="password", key=session_key, help=help_text)
+    with st.expander("Generate IV (16 bytes, base64)"):
+        if st.button("Generate IV", key=btn_key):
+            iv = secrets.token_bytes(16)
+            st.session_state["video_iv_generated"] = b64encode(iv).decode()
+            st.success("IV generated successfully.")
+        iv_display = st.session_state.get("video_iv_generated", "")
+        st.text_input("Generated IV (copy to IV field above)", value=iv_display, key="video_iv_generated_display", disabled=True)
+    return iv_val
+
 def main():
     # Initialize the database
     init_db()
@@ -663,10 +711,12 @@ def main():
                     except Exception as e:
                         st.error(f"Error verifying signature: {e}")
 
-    elif page == "Image and Video Encryption":
+    # --- IMAGE AND VIDEO ENCRYPTION SECTION ---
+    if page == "Image and Video Encryption":
         st.header("Image and Video Encryption")
         st.subheader("Partial Image/Video Encryption (Demo)")
         tabs = st.tabs(["Image", "Video"])
+
         # --- IMAGE TAB ---
         with tabs[0]:
             algorithm = st.selectbox("Select Algorithm", ["AES"], key="imgenc_algorithm_partial")
@@ -674,20 +724,9 @@ def main():
             uploaded_media = st.file_uploader("Upload an Image", type=["png", "jpg", "jpeg"], key="imgenc_file_partial")
             if "imgenc_key_temp" not in st.session_state:
                 st.session_state["imgenc_key_temp"] = ""
-            key = st.text_input("Key (16 bytes for AES)", value=st.session_state["imgenc_key_temp"], type="password", key="imgenc_key_partial")
-            with st.expander("Generate Key from Password"):
-                password = st.text_input("Enter Password for Key Generation", type="password", key="imgenc_password")
-                if st.button("Generate Key for Image/Video Encryption", key="imgenc_btn_generate_key"):
-                    if password:
-                        try:
-                            generated_key = get_key_from_password(password, truncate_to=16)
-                            st.session_state["imgenc_key_temp"] = b64encode(generated_key).decode()
-                            st.success("Key generated successfully.")
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-                    else:
-                        st.error("Please enter a password to generate a key.")
-
+            key = key_input_with_generator(
+                "Key (16 bytes for AES)", "imgenc_key_temp", "imgenc_password", "imgenc_btn_generate_key", truncate_to=16
+            )
             regions = []
             show_canvas = True
             if uploaded_media and uploaded_media.type.startswith("image/"):
@@ -859,31 +898,10 @@ def main():
             uploaded_video = st.file_uploader("Upload a Video", type=["mp4"], key="imgenc_file_video")
             if "video_key_temp" not in st.session_state:
                 st.session_state["video_key_temp"] = ""
-            video_key = st.text_input("Key (16 bytes for AES)", value=st.session_state["video_key_temp"], type="password", key="video_key")
-            # --- IV Generator moved directly under key field ---
-            video_iv = st.text_input("IV (16 bytes, base64)", value="", type="password", key="video_iv")
-            with st.expander("Generate IV (16 bytes, base64)"):
-                if st.button("Generate IV", key="video_btn_generate_iv"):
-                    import secrets, base64
-                    iv = secrets.token_bytes(16)
-                    st.session_state["video_iv_generated"] = b64encode(iv).decode()
-                    st.success("IV generated successfully.")
-                iv_val = st.session_state.get("video_iv_generated", "")
-                st.text_input("Generated IV (copy to IV field above)", value=iv_val, key="video_iv_generated_display", disabled=True)
-            # --- Key generator expander ---
-            with st.expander("Generate Key for Video"):
-                video_password = st.text_input("Enter Password for Key Generation", type="password", key="video_password")
-                if st.button("Generate Key for Video", key="video_btn_generate_key"):
-                    if video_password:
-                        try:
-                            generated_key = get_key_from_password(video_password, truncate_to=16)
-                            st.session_state["video_key_temp"] = b64encode(generated_key).decode()
-                            st.success("Key generated successfully.")
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-                    else:
-                        st.error("Please enter a password to generate a key.")
-
+            video_key = key_input_with_generator(
+                "Key (16 bytes for AES)", "video_key_temp", "video_password", "video_btn_generate_key", truncate_to=16
+            )
+            video_iv = iv_input_with_generator("IV (16 bytes, base64)", "video_iv", "video_btn_generate_iv")
             if video_operation == "Encrypt":
                 # Always show both download buttons after encryption, using session state to store results
                 if "video_encrypted_video_bytes" not in st.session_state:
