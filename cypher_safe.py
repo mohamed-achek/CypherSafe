@@ -23,7 +23,7 @@ st.set_page_config(page_title="CypherSafe", page_icon="Assets/algorithms.png")
 def pixelate_image(image_data):
     """Apply pixelation effect to an image for demonstration/obfuscation."""
     image = Image.open(BytesIO(image_data))
-    small = image.resize((image.width // 10, image.height // 10), resample=Image.BILINEAR)
+    small = image.resize((image.width // 35, image.height // 35), resample=Image.BILINEAR)
     pixelated = small.resize(image.size, Image.NEAREST)
     output = BytesIO()
     pixelated.save(output, format=image.format)
